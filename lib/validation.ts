@@ -3,10 +3,10 @@
 export const LIMITS = {
   subcategoryMin: 2,
   subcategoryMax: 20,
-  textMin: 15, // 일반 분류: 의미 있는 글자 최소
+  textMin: 10, // 일반 분류: 의미 있는 글자 최소
   textMinEtc: 30, // 기타: 의미 있는 글자 최소
   textMax: 300,
-  uniqueMin: 8, // 서로 다른 글자 최소
+  uniqueMin: 6, // 서로 다른 글자 최소
   uniqueMinEtc: 12,
 };
 

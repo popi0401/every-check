@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES, CategoryId, getCategory } from "@/lib/categories";
 import {
   LIMITS,
-  meaningfulCount,
   normalizeForCompare,
   validateActivityText,
   validateSubcategory,
@@ -28,16 +27,33 @@ export default function UploadPage() {
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [alreadyPosted, setAlreadyPosted] = useState<boolean | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
+
+  // 오늘 이미 인증했는지 화면 진입 시 확인
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return setAlreadyPosted(false);
+      const { data } = await supabase
+        .from("posts")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("date", getTodayKST())
+        .maybeSingle();
+      setAlreadyPosted(!!data);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedCategory = getCategory(category);
   const isEtc = category === "etc";
   const subError = category && !isEtc ? validateSubcategory(subcategory) : null;
   const textError = category ? validateActivityText(activityText, isEtc) : null;
-  const textMin = isEtc ? LIMITS.textMinEtc : LIMITS.textMin;
-  const textCount = meaningfulCount(activityText);
   const isValid =
     !!category && !subError && !textError && imageFiles.length > 0;
 
@@ -222,10 +238,34 @@ export default function UploadPage() {
         <h1 className="text-lg font-bold text-foreground flex-1">오늘의 인증</h1>
       </header>
 
+      {alreadyPosted === null && (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-muted text-sm">확인 중...</p>
+        </div>
+      )}
+
+      {alreadyPosted && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 pb-32 text-center">
+          <span className="text-5xl">🎉</span>
+          <div>
+            <p className="text-lg font-bold text-foreground">오늘은 이미 인증했어요</p>
+            <p className="text-muted text-sm mt-1">내일 또 만나요!</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="mt-2 px-6 py-3 rounded-2xl bg-primary text-white font-bold active:scale-[0.98] transition-all"
+          >
+            홈으로
+          </button>
+        </div>
+      )}
+
+      {alreadyPosted === false && (
       <form
         id="upload-form"
         onSubmit={handleSubmit}
-        className="flex-1 flex flex-col gap-5 p-4 pb-6"
+        className="flex-1 flex flex-col gap-5 p-4 pb-32"
       >
         {/* Category */}
         <div className="flex flex-col gap-3">
@@ -421,14 +461,9 @@ export default function UploadPage() {
             rows={isEtc ? 6 : 4}
             className="bg-card text-foreground placeholder-muted border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors resize-none leading-relaxed disabled:opacity-50"
           />
-          <div className="flex items-start justify-between gap-3 text-xs">
-            <p className="text-danger">
-              {activityText.trim() && textError ? textError : ""}
-            </p>
-            <p className={`shrink-0 ${textCount >= textMin ? "text-primary" : "text-muted"}`}>
-              {Math.min(textCount, textMin)}/{textMin}자
-            </p>
-          </div>
+          {activityText.trim() && textError && (
+            <p className="text-danger text-xs">{textError}</p>
+          )}
         </div>
 
         {error && (
@@ -445,6 +480,7 @@ export default function UploadPage() {
           {loading ? "올리는 중..." : "인증 올리기"}
         </button>
       </form>
+      )}
     </div>
   );
 }

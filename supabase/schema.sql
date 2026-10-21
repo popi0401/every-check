@@ -230,10 +230,19 @@ ALTER TABLE posts ADD CONSTRAINT posts_subcategory_check CHECK (
       AND char_length(regexp_replace(subcategory, '[^가-힣A-Za-z0-9]', '', 'g')) >= 2)
 ) NOT VALID;
 
--- 내용: 의미 있는 글자 수(일반 15 / 기타 30), 최대 300자, 같은 글자 4연속 금지
+-- 내용: 의미 있는 글자 수(일반 10 / 기타 30), 최대 300자, 같은 글자 4연속 금지
 ALTER TABLE posts ADD CONSTRAINT posts_activity_text_check CHECK (
   char_length(activity_text) <= 300
   AND activity_text !~ '(\S)\1{3,}'
   AND char_length(regexp_replace(activity_text, '[^가-힣A-Za-z0-9]', '', 'g'))
-      >= CASE WHEN category = 'etc' THEN 30 ELSE 15 END
+      >= CASE WHEN category = 'etc' THEN 30 ELSE 10 END
+) NOT VALID;
+
+-- [2026-10-21 추가] 일반 분류 최소 글자 15 → 10 (위 블록을 이미 실행했다면 이것만 실행)
+ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_activity_text_check;
+ALTER TABLE posts ADD CONSTRAINT posts_activity_text_check CHECK (
+  char_length(activity_text) <= 300
+  AND activity_text !~ '(\S)\1{3,}'
+  AND char_length(regexp_replace(activity_text, '[^가-힣A-Za-z0-9]', '', 'g'))
+      >= CASE WHEN category = 'etc' THEN 30 ELSE 10 END
 ) NOT VALID;
