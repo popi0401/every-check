@@ -2,26 +2,87 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  Freesentation 폰트 사용법:
+  https://github.com/freesentation/freesentation 에서 폰트 다운로드 후
+  public/fonts/ 에 아래 파일 추가:
+    - Freesentation-4Regular.ttf
+    - Freesentation-7Bold.ttf
+*/
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation-4Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation-7Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap");
+
+:root {
+  --background: #121212;
+  --foreground: #f5f5f5;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  background-color: #121212;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Freesentation", "Noto Sans KR", system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.app-container {
+  max-width: 430px;
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+  background-color: #121212;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #121212;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+@keyframes slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  .pb-nav {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  }
+  .animate-slide-up {
+    animation: slide-up 0.25s ease-out;
   }
 }

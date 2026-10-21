@@ -9,8 +9,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "#121212",
+        card: "#1E1E1E",
+        foreground: "#F5F5F5",
+        muted: "#888888",
+        primary: "#FF6B2C",
+        danger: "#FF3B30",
+        border: "#2A2A2A",
+      },
+      fontFamily: {
+        sans: ["Freesentation", "Noto Sans KR", "system-ui", "sans-serif"],
+      },
+      maxWidth: {
+        mobile: "430px",
       },
     },
   },
