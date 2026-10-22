@@ -171,9 +171,24 @@ export default function PostCard({ post, currentUserId }: Props) {
         {canEdit && (
           <Link
             href="/upload"
-            className="text-xs text-muted border border-border rounded-full px-2.5 py-1 hover:text-foreground hover:border-muted transition-colors"
+            aria-label="인증 수정 (오늘 1회)"
+            title="오늘 1회 수정 가능"
+            className="p-1.5 -m-1.5 text-muted hover:text-foreground transition-colors"
           >
-            수정 (1회)
+            {/* lucide: pencil */}
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+              <path d="m15 5 4 4" />
+            </svg>
           </Link>
         )}
         <div className="w-2 h-2 rounded-full bg-green-500" title="인증 완료" />
