@@ -71,7 +71,7 @@ export default function HomePage() {
 
     const { data: postsData } = await supabase
       .from("posts")
-      .select('id, user_id, group_id, date, category, subcategory, activity_text, created_at, post_images(id, image_url, "order", created_at)')
+      .select('id, user_id, group_id, date, category, subcategory, activity_text, edited_at, created_at, post_images(id, image_url, "order", created_at)')
       .eq("date", selectedDate)
       .eq("group_id", group.id)
       .order("created_at", { ascending: false });

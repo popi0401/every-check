@@ -6,6 +6,7 @@ import { Post, PostImage } from "@/types";
 import { createClient } from "@/lib/supabase/client";
 import CommentSection from "./CommentSection";
 import { getCategory } from "@/lib/categories";
+import Link from "next/link";
 
 const COMMON_EMOJIS = [
   "🔥", "👍", "❤️", "😂", "😮", "😢",
@@ -35,6 +36,9 @@ export default function PostCard({ post, currentUserId }: Props) {
 
   const images: PostImage[] = post.images ?? [];
   const category = getCategory(post.category);
+  const todayKST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  const canEdit =
+    post.user_id === currentUserId && !post.edited_at && post.date === todayKST;
 
   // 카드 이미지 터치
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -159,8 +163,19 @@ export default function PostCard({ post, currentUserId }: Props) {
           <p className="text-foreground font-semibold text-sm">
             {post.profiles?.nickname}
           </p>
-          <p className="text-muted text-xs">{timeAgo}</p>
+          <p className="text-muted text-xs">
+            {timeAgo}
+            {post.edited_at && <span className="ml-1">(수정됨)</span>}
+          </p>
         </div>
+        {canEdit && (
+          <Link
+            href="/upload"
+            className="text-xs text-muted border border-border rounded-full px-2.5 py-1 hover:text-foreground hover:border-muted transition-colors"
+          >
+            수정 (1회)
+          </Link>
+        )}
         <div className="w-2 h-2 rounded-full bg-green-500" title="인증 완료" />
       </div>
 

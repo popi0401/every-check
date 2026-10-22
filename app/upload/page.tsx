@@ -14,6 +14,15 @@ import {
 
 const MAX_IMAGES = 3;
 
+interface TodayPost {
+  id: string;
+  category: string | null;
+  subcategory: string | null;
+  activity_text: string;
+  edited_at: string | null;
+  post_images: { image_url: string; order: number }[];
+}
+
 function getTodayKST(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
@@ -27,7 +36,9 @@ export default function UploadPage() {
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [alreadyPosted, setAlreadyPosted] = useState<boolean | null>(null);
+  // undefined = 확인 중, null = 오늘 글 없음
+  const [todayPost, setTodayPost] = useState<TodayPost | null | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
@@ -38,14 +49,14 @@ export default function UploadPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return setAlreadyPosted(false);
+      if (!user) return setTodayPost(null);
       const { data } = await supabase
         .from("posts")
-        .select("id")
+        .select('id, category, subcategory, activity_text, edited_at, post_images(image_url, "order")')
         .eq("user_id", user.id)
         .eq("date", getTodayKST())
         .maybeSingle();
-      setAlreadyPosted(!!data);
+      setTodayPost((data as TodayPost | null) ?? null);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -55,7 +66,25 @@ export default function UploadPage() {
   const subError = category && !isEtc ? validateSubcategory(subcategory) : null;
   const textError = category ? validateActivityText(activityText, isEtc) : null;
   const isValid =
-    !!category && !subError && !textError && imageFiles.length > 0;
+    !!category && !subError && !textError && (editing || imageFiles.length > 0);
+
+  const existingImages = (todayPost?.post_images ?? [])
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((i) => i.image_url);
+
+  // 오늘 글 수정 시작 (1회)
+  const startEdit = () => {
+    if (!todayPost) return;
+    const cat = getCategory(todayPost.category);
+    setCategory(cat ? cat.id : null);
+    const sub = todayPost.subcategory ?? "";
+    setSubcategory(sub);
+    setCustomSub(!!sub && !(cat?.subcategories ?? []).includes(sub));
+    setActivityText(todayPost.activity_text);
+    setError("");
+    setEditing(true);
+  };
 
   const selectCategory = (id: CategoryId) => {
     if (id === category) return;
@@ -94,7 +123,7 @@ export default function UploadPage() {
       setError(firstError);
       return;
     }
-    if (imageFiles.length === 0) {
+    if (!editing && imageFiles.length === 0) {
       setError("인증 사진을 1장 이상 선택해주세요");
       return;
     }
@@ -110,6 +139,43 @@ export default function UploadPage() {
 
       const today = getTodayKST();
 
+      // 직전 인증글과 똑같은 내용 금지 (새 글/수정 공통)
+      const { data: prevPost } = await supabase
+        .from("posts")
+        .select("activity_text")
+        .eq("user_id", user.id)
+        .lt("date", today)
+        .order("date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (
+        prevPost?.activity_text &&
+        normalizeForCompare(prevPost.activity_text) ===
+          normalizeForCompare(activityText)
+      ) {
+        setError("지난번 인증과 똑같은 내용이에요. 오늘 한 일을 새로 적어주세요");
+        setLoading(false);
+        return;
+      }
+
+      // 수정 모드: 분류·소분류·내용만 업데이트 (DB 트리거가 1회·당일 제한)
+      if (editing && todayPost) {
+        const { data: updated, error: updateError } = await supabase
+          .from("posts")
+          .update({
+            category,
+            subcategory: isEtc ? null : subcategory.trim(),
+            activity_text: activityText.trim(),
+          })
+          .eq("id", todayPost.id)
+          .select("id")
+          .maybeSingle();
+        if (updateError) throw updateError;
+        if (!updated) throw new Error("수정할 수 없는 글이에요");
+        window.location.href = "/";
+        return;
+      }
+
       // 오늘 이미 올린 게시물 확인
       const { data: existing } = await supabase
         .from("posts")
@@ -120,26 +186,6 @@ export default function UploadPage() {
 
       if (existing) {
         setError("오늘은 이미 인증했습니다 🎉");
-        setLoading(false);
-        return;
-      }
-
-      // 직전 인증글과 똑같은 내용 금지
-      const { data: lastPost } = await supabase
-        .from("posts")
-        .select("activity_text")
-        .eq("user_id", user.id)
-        .lt("date", today)
-        .order("date", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (
-        lastPost?.activity_text &&
-        normalizeForCompare(lastPost.activity_text) ===
-          normalizeForCompare(activityText)
-      ) {
-        setError("지난번 인증과 똑같은 내용이에요. 오늘 한 일을 새로 적어주세요");
         setLoading(false);
         return;
       }
@@ -235,33 +281,50 @@ export default function UploadPage() {
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="text-lg font-bold text-foreground flex-1">오늘의 인증</h1>
+        <h1 className="text-lg font-bold text-foreground flex-1">
+          {editing ? "인증 수정" : "오늘의 인증"}
+        </h1>
       </header>
 
-      {alreadyPosted === null && (
+      {todayPost === undefined && (
         <div className="flex-1 flex items-center justify-center">
           <p className="text-muted text-sm">확인 중...</p>
         </div>
       )}
 
-      {alreadyPosted && (
+      {todayPost && !editing && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 pb-32 text-center">
           <span className="text-5xl">🎉</span>
           <div>
             <p className="text-lg font-bold text-foreground">오늘은 이미 인증했어요</p>
-            <p className="text-muted text-sm mt-1">내일 또 만나요!</p>
+            <p className="text-muted text-sm mt-1">
+              {todayPost.edited_at
+                ? "오늘 수정 기회도 이미 사용했어요. 내일 또 만나요!"
+                : "내용을 잘못 적었다면 오늘 안에 1번 수정할 수 있어요"}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            className="mt-2 px-6 py-3 rounded-2xl bg-primary text-white font-bold active:scale-[0.98] transition-all"
-          >
-            홈으로
-          </button>
+          <div className="flex gap-2 mt-2">
+            {!todayPost.edited_at && (
+              <button
+                type="button"
+                onClick={startEdit}
+                className="px-6 py-3 rounded-2xl bg-card border border-border text-foreground font-bold active:scale-[0.98] transition-all"
+              >
+                수정하기 (1회)
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              className="px-6 py-3 rounded-2xl bg-primary text-white font-bold active:scale-[0.98] transition-all"
+            >
+              홈으로
+            </button>
+          </div>
         </div>
       )}
 
-      {alreadyPosted === false && (
+      {(todayPost === null || editing) && (
       <form
         id="upload-form"
         onSubmit={handleSubmit}
@@ -352,7 +415,23 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Photo */}
+        {/* Photo (수정 시에는 읽기 전용) */}
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-semibold text-foreground">인증 사진</label>
+            <div className="flex gap-2">
+              {existingImages.map((src, i) => (
+                <div
+                  key={i}
+                  className="relative flex-1 aspect-square rounded-xl overflow-hidden bg-border max-w-[33%]"
+                >
+                  <Image src={src} alt={`인증 사진 ${i + 1}`} fill className="object-cover" unoptimized />
+                </div>
+              ))}
+            </div>
+            <p className="text-muted text-xs">사진은 수정할 수 없어요</p>
+          </div>
+        ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between">
             <label className="text-sm font-semibold text-foreground">
@@ -439,6 +518,7 @@ export default function UploadPage() {
             onChange={handleFileChange}
           />
         </div>
+        )}
 
         {/* Activity Text */}
         <div className="flex flex-col gap-2">
@@ -477,7 +557,13 @@ export default function UploadPage() {
           disabled={loading || !isValid}
           className="mt-5 w-full bg-primary text-white text-base font-bold py-4 rounded-2xl disabled:opacity-40 active:scale-[0.98] transition-all"
         >
-          {loading ? "올리는 중..." : "인증 올리기"}
+          {loading
+            ? editing
+              ? "수정하는 중..."
+              : "올리는 중..."
+            : editing
+            ? "수정 완료 (1회만 가능)"
+            : "인증 올리기"}
         </button>
       </form>
       )}

@@ -246,3 +246,33 @@ ALTER TABLE posts ADD CONSTRAINT posts_activity_text_check CHECK (
   AND char_length(regexp_replace(activity_text, '[^가-힣A-Za-z0-9]', '', 'g'))
       >= CASE WHEN category = 'etc' THEN 30 ELSE 10 END
 ) NOT VALID;
+
+-- ============================================================
+-- [2026-10-21] 인증글 수정: 당일 1회만, 분류·소분류·내용만
+-- ============================================================
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
+CREATE OR REPLACE FUNCTION public.posts_guard_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.user_id IS DISTINCT FROM OLD.user_id
+     OR NEW.group_id IS DISTINCT FROM OLD.group_id
+     OR NEW.date IS DISTINCT FROM OLD.date
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION '날짜나 작성자는 바꿀 수 없어요';
+  END IF;
+  IF OLD.edited_at IS NOT NULL THEN
+    RAISE EXCEPTION '오늘 수정 기회를 이미 사용했어요';
+  END IF;
+  IF OLD.date <> (NOW() AT TIME ZONE 'Asia/Seoul')::date THEN
+    RAISE EXCEPTION '지난 인증은 수정할 수 없어요';
+  END IF;
+  NEW.edited_at := NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS posts_guard_update ON posts;
+CREATE TRIGGER posts_guard_update
+  BEFORE UPDATE ON posts
+  FOR EACH ROW EXECUTE FUNCTION public.posts_guard_update();

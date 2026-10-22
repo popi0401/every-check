@@ -30,6 +30,7 @@ export interface Post {
   category: string | null
   subcategory: string | null
   activity_text: string
+  edited_at: string | null
   created_at: string
   profiles?: Profile
   reactions?: Reaction[]
