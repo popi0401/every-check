@@ -20,8 +20,12 @@ interface TodayPost {
   subcategory: string | null;
   activity_text: string;
   edited_at: string | null;
-  post_images: { image_url: string; order: number }[];
+  post_images: { id: string; image_url: string; order: number }[];
 }
+
+type ImageItem =
+  | { kind: "existing"; id: string; url: string }
+  | { kind: "new"; file: File; url: string };
 
 function getTodayKST(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
@@ -32,8 +36,7 @@ export default function UploadPage() {
   const [subcategory, setSubcategory] = useState("");
   const [customSub, setCustomSub] = useState(false);
   const [activityText, setActivityText] = useState("");
-  const [imageFiles, setImageFiles] = useState<File[]>([]);
-  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [images, setImages] = useState<ImageItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   // undefined = 확인 중, null = 오늘 글 없음
@@ -52,11 +55,15 @@ export default function UploadPage() {
       if (!user) return setTodayPost(null);
       const { data } = await supabase
         .from("posts")
-        .select('id, category, subcategory, activity_text, edited_at, post_images(image_url, "order")')
+        .select('id, category, subcategory, activity_text, edited_at, post_images(id, image_url, "order")')
         .eq("user_id", user.id)
         .eq("date", getTodayKST())
         .maybeSingle();
-      setTodayPost((data as TodayPost | null) ?? null);
+      const post = (data as TodayPost | null) ?? null;
+      setTodayPost(post);
+      // 피드의 수정 아이콘(/upload?edit=1)으로 들어왔고 수정 가능하면 바로 수정 화면
+      const wantEdit = new URLSearchParams(window.location.search).get("edit") === "1";
+      if (post && wantEdit && !post.edited_at) startEdit(post);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -66,25 +73,25 @@ export default function UploadPage() {
   const subError = category && !isEtc ? validateSubcategory(subcategory) : null;
   const textError = category ? validateActivityText(activityText, isEtc) : null;
   const isValid =
-    !!category && !subError && !textError && (editing || imageFiles.length > 0);
+    !!category && !subError && !textError && images.length > 0;
 
-  const existingImages = (todayPost?.post_images ?? [])
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((i) => i.image_url);
-
-  // 오늘 글 수정 시작 (1회)
-  const startEdit = () => {
-    if (!todayPost) return;
+  // 오늘 글 수정 시작
+  function startEdit(todayPost: TodayPost) {
     const cat = getCategory(todayPost.category);
     setCategory(cat ? cat.id : null);
     const sub = todayPost.subcategory ?? "";
     setSubcategory(sub);
     setCustomSub(!!sub && !(cat?.subcategories ?? []).includes(sub));
     setActivityText(todayPost.activity_text);
+    setImages(
+      todayPost.post_images
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((i) => ({ kind: "existing" as const, id: i.id, url: i.image_url }))
+    );
     setError("");
     setEditing(true);
-  };
+  }
 
   const selectCategory = (id: CategoryId) => {
     if (id === category) return;
@@ -97,19 +104,38 @@ export default function UploadPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []);
     if (selected.length === 0) return;
-
-    const merged = [...imageFiles, ...selected].slice(0, MAX_IMAGES);
-    setImageFiles(merged);
-    setImagePreviews(merged.map((f) => URL.createObjectURL(f)));
+    const added: ImageItem[] = selected.map((file) => ({
+      kind: "new",
+      file,
+      url: URL.createObjectURL(file),
+    }));
+    setImages((prev) => [...prev, ...added].slice(0, MAX_IMAGES));
     // reset input so same file can be re-selected
     e.target.value = "";
   };
 
   const removeImage = (index: number) => {
-    const newFiles = imageFiles.filter((_, i) => i !== index);
-    const newPreviews = imagePreviews.filter((_, i) => i !== index);
-    setImageFiles(newFiles);
-    setImagePreviews(newPreviews);
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // 새로 고른 사진은 스토리지에 올리고, 기존 사진은 URL 그대로 → 최종 URL 목록(순서대로)
+  const resolveImageUrls = async (userId: string, today: string): Promise<string[]> => {
+    const urls: string[] = [];
+    for (let i = 0; i < images.length; i++) {
+      const item = images[i];
+      if (item.kind === "existing") {
+        urls.push(item.url);
+        continue;
+      }
+      const ext = item.file.name.split(".").pop() ?? "jpg";
+      const filePath = `${userId}/${today}-${Date.now()}-${i}.${ext}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("posts")
+        .upload(filePath, item.file, { cacheControl: "3600" });
+      if (uploadError) throw uploadError;
+      urls.push(supabase.storage.from("posts").getPublicUrl(uploadData.path).data.publicUrl);
+    }
+    return urls;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -123,7 +149,7 @@ export default function UploadPage() {
       setError(firstError);
       return;
     }
-    if (!editing && imageFiles.length === 0) {
+    if (images.length === 0) {
       setError("인증 사진을 1장 이상 선택해주세요");
       return;
     }
@@ -158,8 +184,24 @@ export default function UploadPage() {
         return;
       }
 
-      // 수정 모드: 분류·소분류·내용만 업데이트 (DB 트리거가 1회·당일 제한)
+      // 수정 모드: 사진 교체 → 글 업데이트 (DB에서 당일·1회 제한)
       if (editing && todayPost) {
+        const urls = await resolveImageUrls(user.id, today);
+        const oldIds = todayPost.post_images.map((i) => i.id);
+
+        // 새 사진 목록을 먼저 넣고, 성공하면 기존 행 삭제 (중간에 실패해도 사진이 사라지지 않게)
+        const { error: insertError } = await supabase.from("post_images").insert(
+          urls.map((image_url, order) => ({ post_id: todayPost.id, image_url, order }))
+        );
+        if (insertError) throw insertError;
+        if (oldIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from("post_images")
+            .delete()
+            .in("id", oldIds);
+          if (deleteError) throw deleteError;
+        }
+
         const { data: updated, error: updateError } = await supabase
           .from("posts")
           .update({
@@ -191,20 +233,7 @@ export default function UploadPage() {
       }
 
       // 이미지 업로드
-      const uploadedUrls: string[] = [];
-      for (let i = 0; i < imageFiles.length; i++) {
-        const file = imageFiles[i];
-        const ext = file.name.split(".").pop() ?? "jpg";
-        const filePath = `${user.id}/${today}-${Date.now()}-${i}.${ext}`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from("posts")
-          .upload(filePath, file, { cacheControl: "3600" });
-        if (uploadError) throw uploadError;
-        const url = supabase.storage
-          .from("posts")
-          .getPublicUrl(uploadData.path).data.publicUrl;
-        uploadedUrls.push(url);
-      }
+      const uploadedUrls = await resolveImageUrls(user.id, today);
 
       // 그룹 조회
       const { data: group } = await supabase
@@ -258,7 +287,7 @@ export default function UploadPage() {
     }
   };
 
-  const canAddMore = imageFiles.length < MAX_IMAGES;
+  const canAddMore = images.length < MAX_IMAGES;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -296,31 +325,16 @@ export default function UploadPage() {
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 pb-32 text-center">
           <span className="text-5xl">🎉</span>
           <div>
-            <p className="text-lg font-bold text-foreground">오늘은 이미 인증했어요</p>
-            <p className="text-muted text-sm mt-1">
-              {todayPost.edited_at
-                ? "오늘 수정 기회도 이미 사용했어요. 내일 또 만나요!"
-                : "내용을 잘못 적었다면 오늘 안에 1번 수정할 수 있어요"}
-            </p>
+            <p className="text-lg font-bold text-foreground">오늘 이미 인증했어요!</p>
+            <p className="text-muted text-sm mt-1">내일 또 만나요</p>
           </div>
-          <div className="flex gap-2 mt-2">
-            {!todayPost.edited_at && (
-              <button
-                type="button"
-                onClick={startEdit}
-                className="px-6 py-3 rounded-2xl bg-card border border-border text-foreground font-bold active:scale-[0.98] transition-all"
-              >
-                수정하기 (1회)
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => router.push("/")}
-              className="px-6 py-3 rounded-2xl bg-primary text-white font-bold active:scale-[0.98] transition-all"
-            >
-              홈으로
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className="mt-2 px-6 py-3 rounded-2xl bg-primary text-white font-bold active:scale-[0.98] transition-all"
+          >
+            홈으로
+          </button>
         </div>
       )}
 
@@ -415,23 +429,7 @@ export default function UploadPage() {
           </div>
         )}
 
-        {/* Photo (수정 시에는 읽기 전용) */}
-        {editing ? (
-          <div className="flex flex-col gap-2">
-            <label className="text-sm font-semibold text-foreground">인증 사진</label>
-            <div className="flex gap-2">
-              {existingImages.map((src, i) => (
-                <div
-                  key={i}
-                  className="relative flex-1 aspect-square rounded-xl overflow-hidden bg-border max-w-[33%]"
-                >
-                  <Image src={src} alt={`인증 사진 ${i + 1}`} fill className="object-cover" unoptimized />
-                </div>
-              ))}
-            </div>
-            <p className="text-muted text-xs">사진은 수정할 수 없어요</p>
-          </div>
-        ) : (
+        {/* Photo */}
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between">
             <label className="text-sm font-semibold text-foreground">
@@ -439,16 +437,16 @@ export default function UploadPage() {
               <span className="text-danger text-xs font-normal">필수</span>
             </label>
             <span className="text-muted text-xs">
-              {imageFiles.length}/{MAX_IMAGES}장
+              {images.length}/{MAX_IMAGES}장
             </span>
           </div>
 
           {/* Preview grid */}
-          {imagePreviews.length > 0 && (
+          {images.length > 0 && (
             <div className="flex gap-2">
-              {imagePreviews.map((src, i) => (
+              {images.map(({ url: src }, i) => (
                 <div
-                  key={i}
+                  key={src}
                   className="relative flex-1 aspect-square rounded-xl overflow-hidden bg-border"
                 >
                   <Image
@@ -482,7 +480,7 @@ export default function UploadPage() {
           )}
 
           {/* 첫 장 선택 버튼 */}
-          {imagePreviews.length === 0 && (
+          {images.length === 0 && (
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -518,7 +516,6 @@ export default function UploadPage() {
             onChange={handleFileChange}
           />
         </div>
-        )}
 
         {/* Activity Text */}
         <div className="flex flex-col gap-2">
@@ -562,7 +559,7 @@ export default function UploadPage() {
               ? "수정하는 중..."
               : "올리는 중..."
             : editing
-            ? "수정 완료 (1회만 가능)"
+            ? "수정 완료"
             : "인증 올리기"}
         </button>
       </form>

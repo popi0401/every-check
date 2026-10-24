@@ -170,9 +170,9 @@ export default function PostCard({ post, currentUserId }: Props) {
         </div>
         {canEdit && (
           <Link
-            href="/upload"
-            aria-label="인증 수정 (오늘 1회)"
-            title="오늘 1회 수정 가능"
+            href="/upload?edit=1"
+            aria-label="인증 수정"
+            title="수정"
             className="p-1.5 -m-1.5 text-muted hover:text-foreground transition-colors"
           >
             {/* lucide: pencil */}

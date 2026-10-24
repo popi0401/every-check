@@ -276,3 +276,27 @@ DROP TRIGGER IF EXISTS posts_guard_update ON posts;
 CREATE TRIGGER posts_guard_update
   BEFORE UPDATE ON posts
   FOR EACH ROW EXECUTE FUNCTION public.posts_guard_update();
+
+-- ============================================================
+-- [2026-10-22] 수정 시 사진 교체 허용
+-- 사진 추가/삭제는 본인 글 + 오늘 날짜 + 아직 수정 전일 때만
+-- ============================================================
+DROP POLICY IF EXISTS "post_images_insert" ON post_images;
+CREATE POLICY "post_images_insert" ON post_images FOR INSERT WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM posts
+    WHERE id = post_id AND user_id = auth.uid()
+      AND date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+      AND edited_at IS NULL
+  )
+);
+
+DROP POLICY IF EXISTS "post_images_delete" ON post_images;
+CREATE POLICY "post_images_delete" ON post_images FOR DELETE USING (
+  EXISTS (
+    SELECT 1 FROM posts
+    WHERE id = post_id AND user_id = auth.uid()
+      AND date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+      AND edited_at IS NULL
+  )
+);
