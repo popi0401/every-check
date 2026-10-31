@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { CATEGORIES, CategoryId, getCategory } from "@/lib/categories";
 import {
   LIMITS,
+  meaningfulCount,
   normalizeForCompare,
   validateActivityText,
   validateSubcategory,
@@ -74,6 +75,13 @@ export default function UploadPage() {
   const textError = category ? validateActivityText(activityText, isEtc) : null;
   const isValid =
     !!category && !subError && !textError && images.length > 0;
+  const textMin = isEtc ? LIMITS.textMinEtc : LIMITS.textMin;
+  const textShort = Math.max(0, textMin - meaningfulCount(activityText));
+
+  // 입력이 바뀌면 이전 안내 문구는 지움
+  useEffect(() => {
+    setError("");
+  }, [category, subcategory, customSub, activityText, images]);
 
   // 오늘 글 수정 시작
   function startEdit(todayPost: TodayPost) {
@@ -144,13 +152,19 @@ export default function UploadPage() {
       setError("오늘 무엇을 했는지 분류를 골라주세요");
       return;
     }
-    const firstError = subError ?? textError;
-    if (firstError) {
-      setError(firstError);
+    // 화면 순서대로 빠진 것을 알려줌 (분류 → 소분류 → 사진 → 내용)
+    if (subError) {
+      setError(
+        customSub ? subError : `${selectedCategory?.label ?? ""} 중에 무엇을 했는지 하나 골라주세요`
+      );
       return;
     }
     if (images.length === 0) {
       setError("인증 사진을 1장 이상 선택해주세요");
+      return;
+    }
+    if (textError) {
+      setError(textError);
       return;
     }
 
@@ -539,7 +553,11 @@ export default function UploadPage() {
             className="bg-card text-foreground placeholder-muted border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary transition-colors resize-none leading-relaxed disabled:opacity-50"
           />
           {activityText.trim() && textError && (
-            <p className="text-danger text-xs">{textError}</p>
+            <p className="text-danger text-xs">
+              {textShort > 0
+                ? `${textShort}자 더 적어주세요 · 공백, 이모지, ㅋㅋ 같은 자음·모음은 글자 수에 안 들어가요`
+                : textError}
+            </p>
           )}
         </div>
 
@@ -551,8 +569,10 @@ export default function UploadPage() {
 
         <button
           type="submit"
-          disabled={loading || !isValid}
-          className="mt-5 w-full bg-primary text-white text-base font-bold py-4 rounded-2xl disabled:opacity-40 active:scale-[0.98] transition-all"
+          disabled={loading}
+          className={`mt-5 w-full bg-primary text-white text-base font-bold py-4 rounded-2xl disabled:opacity-40 active:scale-[0.98] transition-all ${
+            isValid ? "" : "opacity-40"
+          }`}
         >
           {loading
             ? editing
