@@ -25,8 +25,13 @@ function useInView<T extends Element>(threshold = 0.55) {
         if (e.isIntersecting && e.intersectionRatio >= threshold) {
           if (!shown.current) {
             shown.current = true;
+            // 먼저 비어 있는 상태로 새로 그린 뒤, 다음 프레임에 켜야 그래프가 0에서부터 차오른다
             setRound((r) => r + 1);
-            setInView(true);
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => {
+                if (shown.current) setInView(true);
+              })
+            );
           }
         } else if (!e.isIntersecting || e.intersectionRatio < 0.05) {
           // 스냅 스크롤에선 옆 섹션이 화면 가장자리에 딱 붙어 있어 '교차 중(비율 0)'으로 잡히므로 비율로 판단

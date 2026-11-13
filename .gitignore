@@ -42,3 +42,4 @@ next-env.d.ts
 
 # scratch
 /_rt.ts
+/components/recap/RecapView-1.tsx
