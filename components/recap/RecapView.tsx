@@ -28,12 +28,13 @@ function useInView<T extends Element>(threshold = 0.55) {
             setRound((r) => r + 1);
             setInView(true);
           }
-        } else if (!e.isIntersecting) {
+        } else if (!e.isIntersecting || e.intersectionRatio < 0.05) {
+          // 스냅 스크롤에선 옆 섹션이 화면 가장자리에 딱 붙어 있어 '교차 중(비율 0)'으로 잡히므로 비율로 판단
           shown.current = false;
           setInView(false);
         }
       },
-      { threshold: [0, threshold] }
+      { threshold: [0, 0.05, threshold] }
     );
     io.observe(el);
     return () => io.disconnect();
