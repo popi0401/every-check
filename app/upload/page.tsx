@@ -555,7 +555,7 @@ export default function UploadPage() {
           {activityText.trim() && textError && (
             <p className="text-danger text-xs">
               {textShort > 0
-                ? `${textShort}자 더 적어주세요 · 공백, 이모지, ㅋㅋ 같은 자음·모음은 글자 수에 안 들어가요`
+                ? `${textShort}자 더 적어주세요 · 공백, 이모지, ㅋㅋ, 같은 글자 반복은 글자 수에 안 들어가요`
                 : textError}
             </p>
           )}

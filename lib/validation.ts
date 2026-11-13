@@ -1,4 +1,4 @@
-// 인증글 입력 검증 — 'ㄱ', 'ㅋㅋㅋㅋ' 같은 무성의한 글 방지
+// 인증글 입력 검증 — 'ㄱ', 'ㅋㅋㅋㅋ', '아아아' 같은 건 글자 수에서 뺀다
 
 export const LIMITS = {
   subcategoryMin: 2,
@@ -17,29 +17,28 @@ export function meaningfulChars(text: string): string[] {
   return text.match(MEANINGFUL) ?? [];
 }
 
+/**
+ * 글자 수에 들어가는 부분만 남긴다. 반복은 막지 않고 세지만 않는다.
+ * - 같은 한글/영문 3번 이상 연속(아아아) → 통째로 제외
+ * - 같은 숫자 4번 이상 연속(11111) → 제외 (1000원은 그대로 셈)
+ * - 2~4글자 묶음 반복(하이하이하이) → 한 번만 셈
+ * DB 제약(posts_activity_text_check)은 앞의 두 규칙만 적용해 항상 이보다 너그럽다.
+ */
+export function countableText(text: string): string {
+  return meaningfulChars(text)
+    .join("")
+    .replace(/([가-힣A-Za-z])\1{2,}/g, "")
+    .replace(/([0-9])\1{3,}/g, "")
+    .replace(/([가-힣A-Za-z0-9]{2,4})\1{2,}/g, "$1");
+}
+
 export function meaningfulCount(text: string): number {
-  return meaningfulChars(text).length;
-}
-
-/** 같은 글자 4번 이상 연속 (3번까지는 허용: 11000원, ㅋㅋㅋ, 11/11) */
-export function hasCharRepeat(text: string): boolean {
-  return /(\S)\1{3,}/.test(text);
-}
-
-/** 2~4글자 묶음이 3번 이상 연속 (ㅋㅎㅋㅎㅋㅎ, 하이하이하이) */
-export function hasChunkRepeat(text: string): boolean {
-  return /(\S{2,4})\1{2,}/.test(text);
+  return countableText(text).length;
 }
 
 /** 비교용 정규화: 공백·특수문자 제거, 소문자 */
 export function normalizeForCompare(text: string): string {
   return meaningfulChars(text).join("").toLowerCase();
-}
-
-function repeatError(text: string): string | null {
-  if (hasCharRepeat(text)) return "같은 글자는 3번까지만 연속으로 쓸 수 있어요";
-  if (hasChunkRepeat(text)) return "같은 말을 계속 반복할 수 없어요";
-  return null;
 }
 
 export function validateSubcategory(text: string): string | null {
@@ -48,7 +47,7 @@ export function validateSubcategory(text: string): string | null {
   if (t.length > LIMITS.subcategoryMax) return `소분류는 ${LIMITS.subcategoryMax}자 이내로 적어주세요`;
   if (meaningfulCount(t) < LIMITS.subcategoryMin)
     return `소분류는 ${LIMITS.subcategoryMin}글자 이상 적어주세요`;
-  return repeatError(t);
+  return null;
 }
 
 export function validateActivityText(text: string, isEtc: boolean): string | null {
@@ -57,11 +56,9 @@ export function validateActivityText(text: string, isEtc: boolean): string | nul
   const uniqueMin = isEtc ? LIMITS.uniqueMinEtc : LIMITS.uniqueMin;
   if (!t) return "오늘 한 일을 적어주세요";
   if (t.length > LIMITS.textMax) return `${LIMITS.textMax}자 이내로 적어주세요`;
-  const rep = repeatError(t);
-  if (rep) return rep;
-  const chars = meaningfulChars(t);
-  if (chars.length < min)
-    return `조금 더 자세히 적어주세요 (자음·모음, 공백, 이모지 제외 ${min}자 이상)`;
-  if (new Set(chars).size < uniqueMin) return "같은 글자만 반복하지 말고 내용을 적어주세요";
+  const counted = countableText(t);
+  if (counted.length < min)
+    return `조금 더 자세히 적어주세요 (공백, 이모지, ㅋㅋ, 같은 글자 반복 제외 ${min}자 이상)`;
+  if (new Set(counted.split("")).size < uniqueMin) return "같은 글자만 반복하지 말고 내용을 적어주세요";
   return null;
 }

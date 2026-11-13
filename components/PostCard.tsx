@@ -212,8 +212,8 @@ export default function PostCard({ post, currentUserId }: Props) {
 
       {/* Activity Text */}
       {post.activity_text && (
-        <p className="px-4 pb-3 text-foreground text-sm leading-relaxed">
-          {post.activity_text}
+        <p className="px-4 pb-3 text-foreground text-sm leading-relaxed whitespace-pre-line break-words">
+          {post.activity_text.trim().replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n")}
         </p>
       )}
 

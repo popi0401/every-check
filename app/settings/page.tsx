@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { Profile, Group } from "@/types";
+import Link from "next/link";
+import { FIRST_RECAP_YEAR } from "@/lib/recapSeen";
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -325,6 +327,68 @@ export default function SettingsPage() {
             </div>
           </section>
         )}
+
+        {/* 연말정산 */}
+        <section>
+          <h2 className="text-xs font-semibold text-muted uppercase tracking-widest mb-3">
+            연말정산
+          </h2>
+          {(() => {
+            const nowYear = Number(
+              new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }).slice(0, 4)
+            );
+            const years: number[] = [];
+            for (let y = nowYear - 1; y >= FIRST_RECAP_YEAR; y--) years.push(y);
+            return (
+              <div className="flex flex-col gap-2">
+                {years.length === 0 ? (
+                  <div className="bg-card rounded-2xl p-4 border border-border flex items-center gap-3">
+                    <span className="text-2xl">🔒</span>
+                    <div>
+                      <p className="text-foreground text-sm font-semibold">
+                        {nowYear} 연말정산
+                      </p>
+                      <p className="text-muted text-xs mt-0.5">
+                        {nowYear + 1}년 1월 1일에 공개돼요
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  years.map((y) => (
+                    <Link
+                      key={y}
+                      href={`/recap?year=${y}`}
+                      className="bg-card rounded-2xl p-4 border border-border flex items-center gap-3 active:scale-[0.98] transition-all"
+                    >
+                      <span className="text-2xl">🏆</span>
+                      <div className="flex-1">
+                        <p className="text-foreground text-sm font-semibold">{y} 연말정산</p>
+                        <p className="text-muted text-xs mt-0.5">나와 그룹의 1년, 올해의 상 다시 보기</p>
+                      </div>
+                      <span className="text-muted">›</span>
+                    </Link>
+                  ))
+                )}
+                {profile?.is_admin && (
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/recap?year=${nowYear}&preview=1`}
+                      className="flex-1 text-center bg-primary/10 text-primary border border-primary/30 text-xs font-bold py-2.5 rounded-xl"
+                    >
+                      {nowYear} 미리보기 (관리자)
+                    </Link>
+                    <Link
+                      href="/recap?demo=1"
+                      className="flex-1 text-center bg-card text-muted border border-border text-xs font-bold py-2.5 rounded-xl"
+                    >
+                      샘플 데이터로 보기
+                    </Link>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </section>
 
         {/* Notification (UI only) */}
         <section>

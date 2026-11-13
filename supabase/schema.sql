@@ -300,3 +300,21 @@ CREATE POLICY "post_images_delete" ON post_images FOR DELETE USING (
       AND edited_at IS NULL
   )
 );
+
+-- ============================================================
+-- [2026-10-31] 연말정산: 1/1 첫 화면을 본 연도 (한 번만 보여주기)
+-- ============================================================
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS wrapped_seen_year INTEGER;
+
+-- 반복 글자는 막지 않고 글자 수에서만 제외 (3번 이상 같은 한글/영문, 4번 이상 같은 숫자)
+ALTER TABLE posts DROP CONSTRAINT IF EXISTS posts_activity_text_check;
+ALTER TABLE posts ADD CONSTRAINT posts_activity_text_check CHECK (
+  char_length(activity_text) <= 300
+  AND char_length(
+    regexp_replace(
+      regexp_replace(
+        regexp_replace(activity_text, '[^가-힣A-Za-z0-9]', '', 'g'),
+        '([가-힣A-Za-z])\1{2,}', '', 'g'),
+      '([0-9])\1{3,}', '', 'g')
+  ) >= CASE WHEN category = 'etc' THEN 30 ELSE 10 END
+) NOT VALID;
