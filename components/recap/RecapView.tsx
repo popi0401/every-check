@@ -12,30 +12,42 @@ import {
 
 // ---------------- 도우미 ----------------
 function useInView<T extends Element>(threshold = 0.55) {
+  // 들어올 때마다 다시 재생: 충분히 보이면 켜고, 화면에서 완전히 벗어나면 끈다
   const ref = useRef<T>(null);
   const [inView, setInView] = useState(false);
+  const [round, setRound] = useState(0);
+  const shown = useRef(false);
   useEffect(() => {
     const el = ref.current;
-    if (!el || inView) return;
+    if (!el) return;
     const io = new IntersectionObserver(
       ([e]) => {
-        if (e.isIntersecting) {
-          setInView(true);
-          io.disconnect();
+        if (e.isIntersecting && e.intersectionRatio >= threshold) {
+          if (!shown.current) {
+            shown.current = true;
+            setRound((r) => r + 1);
+            setInView(true);
+          }
+        } else if (!e.isIntersecting) {
+          shown.current = false;
+          setInView(false);
         }
       },
-      { threshold }
+      { threshold: [0, threshold] }
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [inView, threshold]);
-  return [ref, inView] as const;
+  }, [threshold]);
+  return [ref, inView, round] as const;
 }
 
 function useCountUp(target: number, active: boolean, duration = 1400) {
   const [v, setV] = useState(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setV(0);
+      return;
+    }
     if (prefersReducedMotion()) {
       setV(target);
       return;
@@ -57,7 +69,10 @@ function useCountUp(target: number, active: boolean, duration = 1400) {
 function useLater(active: boolean, ms: number) {
   const [t, setT] = useState(0);
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      setT(0);
+      return;
+    }
     const id = setTimeout(() => setT(1), ms);
     return () => clearTimeout(id);
   }, [active, ms]);
@@ -93,11 +108,14 @@ function Section({
   bg,
   sectionRef,
   className = "",
+  replay = 0,
 }: {
   children: ReactNode;
   bg: string;
   sectionRef?: React.Ref<HTMLElement>;
   className?: string;
+  /** 바뀔 때마다 안쪽을 새로 그려 CSS 애니메이션을 처음부터 재생 */
+  replay?: number;
 }) {
   return (
     <section
@@ -105,7 +123,9 @@ function Section({
       className={`recap-anim relative min-h-[100dvh] snap-start snap-always flex flex-col items-center justify-center px-6 overflow-hidden text-center ${className}`}
       style={{ background: bg }}
     >
-      {children}
+      <div key={replay} className="contents">
+        {children}
+      </div>
     </section>
   );
 }
@@ -147,11 +167,14 @@ const BG = {
 
 // ---------------- 섹션들 ----------------
 function IntroSection({ year, me, note }: { year: number; me: MemberStats | null; note: string | null }) {
-  const [ref, inView] = useInView<HTMLElement>(0.3);
+  const [ref, inView, round] = useInView<HTMLElement>(0.3);
   const full = "우리, 매일 뭘 했을까?";
   const [typed, setTyped] = useState("");
   useEffect(() => {
-    if (!inView) return;
+    if (!inView) {
+      setTyped("");
+      return;
+    }
     if (prefersReducedMotion()) return setTyped(full);
     let i = 0;
     const id = setInterval(() => {
@@ -163,7 +186,7 @@ function IntroSection({ year, me, note }: { year: number; me: MemberStats | null
   }, [inView]);
   const burst = useLater(inView, 300);
   return (
-    <Section sectionRef={ref} bg={BG.intro}>
+    <Section sectionRef={ref} replay={round} bg={BG.intro}>
       <Sparkles trigger={burst} originY={0.38} count={70} />
       {note && <span className="absolute top-6 left-6 text-[11px] px-2.5 py-1 rounded-full bg-white/10 text-white/70">{note}</span>}
       <FadeUp show={inView}>
@@ -182,12 +205,12 @@ function IntroSection({ year, me, note }: { year: number; me: MemberStats | null
 }
 
 function DaysSection({ me, year }: { me: MemberStats; year: number }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const ok = Math.round(useCountUp(me.successDays, inView, 1600));
   const fromJan = me.startDate === `${year}-01-01`;
   const burst = useLater(inView, 1700);
   return (
-    <Section sectionRef={ref} bg={BG.days}>
+    <Section sectionRef={ref} replay={round} bg={BG.days}>
       <Sparkles trigger={burst} originY={0.2} count={40} />
       <FadeUp show={inView}>
         <p className="text-white/60 text-base">{fromJan ? "올해" : "가입 후"} {me.targetDays}일 중</p>
@@ -219,14 +242,14 @@ function DaysSection({ me, year }: { me: MemberStats; year: number }) {
 }
 
 function RateSection({ me }: { me: MemberStats }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const rate = me.rate ?? 0;
   const v = useCountUp(rate * 100, inView, 1600);
   const burst = useLater(inView, 1650);
   const R = 84, C = 2 * Math.PI * R;
   const msg = rate >= 0.95 ? "거의 완벽한 한 해였어요" : rate >= 0.85 ? "정말 꾸준했어요" : rate >= 0.7 ? "흔들려도 잘 버텼어요" : "내년엔 더 잘할 수 있어요";
   return (
-    <Section sectionRef={ref} bg={BG.rate}>
+    <Section sectionRef={ref} replay={round} bg={BG.rate}>
       <Sparkles trigger={burst} count={80} />
       <FadeUp show={inView}><p className="text-white/60">올해 나의 성공률</p></FadeUp>
       <div className="relative mt-6 w-[220px] h-[220px]">
@@ -255,11 +278,11 @@ function RateSection({ me }: { me: MemberStats }) {
 }
 
 function MonthlySection({ me, group }: { me: MemberStats; group: RecapResult["group"] }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const burst = useLater(inView, 1500);
   const best = me.bestMonth;
   return (
-    <Section sectionRef={ref} bg={BG.monthly}>
+    <Section sectionRef={ref} replay={round} bg={BG.monthly}>
       <FadeUp show={inView}>
         <p className="text-white/60">월별 성공률</p>
         {best != null && (
@@ -307,12 +330,12 @@ function MonthlySection({ me, group }: { me: MemberStats; group: RecapResult["gr
 }
 
 function StreakSection({ me }: { me: MemberStats }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const v = Math.round(useCountUp(me.longestStreak, inView, 1500));
   const burst = useLater(inView, 1550);
   const scale = 0.5 + Math.min(1, me.longestStreak / 60) * 0.7;
   return (
-    <Section sectionRef={ref} bg={BG.streak}>
+    <Section sectionRef={ref} replay={round} bg={BG.streak}>
       <Sparkles trigger={burst} originY={0.35} count={60} />
       <FadeUp show={inView}><p className="text-white/60">최장 연속 인증</p></FadeUp>
       <div
@@ -336,12 +359,12 @@ function StreakSection({ me }: { me: MemberStats }) {
 }
 
 function CategorySection({ me, year }: { me: MemberStats; year: number }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const burst = useLater(inView, 1300);
   const entries = Object.entries(me.categoryCounts).sort((a, b) => b[1] - a[1]);
   const top = entries[0];
   return (
-    <Section sectionRef={ref} bg={BG.category}>
+    <Section sectionRef={ref} replay={round} bg={BG.category}>
       {top ? (
         <>
           <Sparkles trigger={burst} originY={0.42} count={60} />
@@ -378,13 +401,13 @@ function CategorySection({ me, year }: { me: MemberStats; year: number }) {
 }
 
 function FineSection({ me }: { me: MemberStats }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const v = Math.round(useCountUp(me.fine, inView, 1800));
   const missed = me.targetDays - me.successDays;
   const coins = Math.min(missed, 24);
   const burst = useLater(inView && me.fine === 0, 600);
   return (
-    <Section sectionRef={ref} bg={BG.fine}>
+    <Section sectionRef={ref} replay={round} bg={BG.fine}>
       {me.fine === 0 && <Sparkles trigger={burst} palette="gold" count={90} />}
       <div className="absolute inset-x-0 bottom-0 h-[45%] pointer-events-none">
         {inView &&
@@ -414,13 +437,13 @@ function FineSection({ me }: { me: MemberStats }) {
 }
 
 function GroupSection({ data, nameOf }: { data: RecapResult; nameOf: (id: string) => MemberStats | undefined }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const g = data.group;
   const all = Math.round(useCountUp(g.allSuccessDays, inView, 1600));
   const burst = useLater(inView, 1700);
   const ms = data.members;
   return (
-    <Section sectionRef={ref} bg={BG.group}>
+    <Section sectionRef={ref} replay={round} bg={BG.group}>
       <Sparkles trigger={burst} originY={0.3} count={60} />
       <FadeUp show={inView}><p className="text-white/60">우리 그룹 {g.memberCount}명의 1년</p></FadeUp>
       <div className="mt-6 flex flex-wrap justify-center gap-2 max-w-[300px]">
@@ -466,10 +489,10 @@ function GroupSection({ data, nameOf }: { data: RecapResult; nameOf: (id: string
 }
 
 function CeremonySection({ year }: { year: number }) {
-  const [ref, inView] = useInView<HTMLElement>();
+  const [ref, inView, round] = useInView<HTMLElement>();
   const burst = useLater(inView, 400);
   return (
-    <Section sectionRef={ref} bg={BG.ceremony}>
+    <Section sectionRef={ref} replay={round} bg={BG.ceremony}>
       <Sparkles trigger={burst} palette="gold" count={90} />
       <FadeUp show={inView}>
         <p className="text-6xl" style={{ animation: inView ? "recap-glow 2s ease-in-out infinite" : "none" }}>🎖️</p>
@@ -599,7 +622,7 @@ function SummarySection({
   onClose: () => void;
   isDemo: boolean;
 }) {
-  const [ref, inView] = useInView<HTMLElement>(0.4);
+  const [ref, inView, round] = useInView<HTMLElement>(0.4);
   const cardRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const burst = useLater(inView, 300);
@@ -627,7 +650,7 @@ function SummarySection({
   };
 
   return (
-    <Section sectionRef={ref} bg={BG.summary} className="!justify-start pt-14 pb-12">
+    <Section sectionRef={ref} replay={round} bg={BG.summary} className="!justify-start pt-14 pb-12">
       <Sparkles trigger={burst} count={70} originY={0.3} />
       <FadeUp show={inView} className="w-full flex flex-col items-center">
         <div ref={cardRef} className="w-full max-w-[340px] rounded-3xl p-6 text-left border border-white/10" style={{ background: "linear-gradient(160deg,#3b1806 0%,#1E1E1E 55%,#121212 100%)" }}>
