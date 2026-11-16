@@ -318,3 +318,52 @@ ALTER TABLE posts ADD CONSTRAINT posts_activity_text_check CHECK (
       '([0-9])\1{3,}', '', 'g')
   ) >= CASE WHEN category = 'etc' THEN 30 ELSE 10 END
 ) NOT VALID;
+
+-- ============================================================
+-- [2026-11-16] 지난 날짜 인증 (관리자가 멤버별로 켜고 끔)
+-- 켜진 멤버: 최근 7일(오늘 포함) 안 + 이번 달 날짜로 인증 가능
+-- ============================================================
+ALTER TABLE group_members ADD COLUMN IF NOT EXISTS backfill_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 관리자만 멤버 설정을 바꿀 수 있음
+DROP POLICY IF EXISTS "group_members_update_admin" ON group_members;
+CREATE POLICY "group_members_update_admin" ON group_members FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND is_admin = TRUE)
+);
+
+-- 새로 가입할 때 스스로 켜고 들어오는 것 방지
+DROP POLICY IF EXISTS "group_members_insert" ON group_members;
+CREATE POLICY "group_members_insert" ON group_members FOR INSERT WITH CHECK (
+  auth.uid() = user_id AND backfill_enabled = FALSE
+);
+
+-- 인증 날짜: 오늘(자정 직후 10분은 어제도) / 허용된 멤버는 최근 7일 안의 이번 달 날짜
+DROP POLICY IF EXISTS "posts_insert" ON posts;
+CREATE POLICY "posts_insert" ON posts FOR INSERT WITH CHECK (
+  auth.uid() = user_id AND (
+    date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+    OR (date = (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1
+        AND (NOW() AT TIME ZONE 'Asia/Seoul')::time < '00:10')
+    OR (
+      date < (NOW() AT TIME ZONE 'Asia/Seoul')::date
+      AND date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - 6
+      AND date_trunc('month', date) = date_trunc('month', (NOW() AT TIME ZONE 'Asia/Seoul')::date)
+      AND EXISTS (
+        SELECT 1 FROM group_members gm
+        WHERE gm.user_id = auth.uid() AND gm.group_id = posts.group_id AND gm.backfill_enabled
+      )
+    )
+  )
+);
+
+-- 사진: 오늘 글이거나 방금(30분 안) 만든 글(지난 날짜 인증)일 때만
+DROP POLICY IF EXISTS "post_images_insert" ON post_images;
+CREATE POLICY "post_images_insert" ON post_images FOR INSERT WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM posts
+    WHERE id = post_id AND user_id = auth.uid()
+      AND edited_at IS NULL
+      AND (date = (NOW() AT TIME ZONE 'Asia/Seoul')::date
+           OR created_at > NOW() - INTERVAL '30 minutes')
+  )
+);

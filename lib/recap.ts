@@ -174,7 +174,9 @@ export function computeRecap(input: RecapInput): RecapResult {
 
     const categoryCounts: Record<string, number> = {};
     for (const p of myPosts) if (p.category) categoryCounts[p.category] = (categoryCounts[p.category] ?? 0) + 1;
-    const mins = myPosts.map((p) => kstMinutes(p.created_at));
+    // 지난 날짜로 늦게 올린 글은 업로드 시각 통계에서 제외
+    const kstDay = (iso: string) => new Date(Date.parse(iso) + 9 * 3600000).toISOString().slice(0, 10);
+    const mins = myPosts.filter((p) => kstDay(p.created_at) === p.date).map((p) => kstMinutes(p.created_at));
 
     return {
       userId: m.userId,

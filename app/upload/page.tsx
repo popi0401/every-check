@@ -32,6 +32,18 @@ function getTodayKST(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
+/** 'YYYY-MM-DD'에서 n일 이동 */
+function shiftDate(d: string, n: number): string {
+  const [y, m, day] = d.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, day + n));
+  return t.toISOString().slice(0, 10);
+}
+
+const md = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+
+/** 지난 날짜 인증: 최근 7일(오늘 포함) 안이면서 같은 달인 지난 날짜 */
+const BACKFILL_DAYS = 7;
+
 export default function UploadPage() {
   const [category, setCategory] = useState<CategoryId | null>(null);
   const [subcategory, setSubcategory] = useState("");
@@ -43,6 +55,11 @@ export default function UploadPage() {
   // undefined = 확인 중, null = 오늘 글 없음
   const [todayPost, setTodayPost] = useState<TodayPost | null | undefined>(undefined);
   const [editing, setEditing] = useState(false);
+  // 지난 날짜 인증 (관리자가 켜준 멤버만)
+  const today = getTodayKST();
+  const [backfill, setBackfill] = useState(false);
+  const [postedDates, setPostedDates] = useState<Set<string>>(new Set());
+  const [targetDate, setTargetDate] = useState(today);
   const fileRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
@@ -54,6 +71,12 @@ export default function UploadPage() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) return setTodayPost(null);
+      const [{ data: gm }, { data: recent }] = await Promise.all([
+        supabase.from("group_members").select("backfill_enabled").eq("user_id", user.id).limit(1).maybeSingle(),
+        supabase.from("posts").select("date").eq("user_id", user.id).gte("date", shiftDate(getTodayKST(), -(BACKFILL_DAYS - 1))),
+      ]);
+      setBackfill(!!(gm as { backfill_enabled?: boolean } | null)?.backfill_enabled);
+      setPostedDates(new Set(((recent as { date: string }[] | null) ?? []).map((r) => r.date)));
       const { data } = await supabase
         .from("posts")
         .select('id, category, subcategory, activity_text, edited_at, post_images(id, image_url, "order")')
@@ -76,12 +99,24 @@ export default function UploadPage() {
   const isValid =
     !!category && !subError && !textError && images.length > 0;
   const textMin = isEtc ? LIMITS.textMinEtc : LIMITS.textMin;
+
+  // 고를 수 있는 지난 날짜 (최신순)
+  const backfillDates: string[] = [];
+  if (backfill) {
+    for (let i = 1; i < BACKFILL_DAYS; i++) {
+      const d = shiftDate(today, -i);
+      if (d.slice(0, 7) !== today.slice(0, 7)) break;
+      if (!postedDates.has(d)) backfillDates.push(d);
+    }
+  }
+  const isPast = !editing && targetDate !== today;
+  const showForm = todayPost === null || editing || (todayPost !== undefined && isPast);
   const textShort = Math.max(0, textMin - meaningfulCount(activityText));
 
   // 입력이 바뀌면 이전 안내 문구는 지움
   useEffect(() => {
     setError("");
-  }, [category, subcategory, customSub, activityText, images]);
+  }, [category, subcategory, customSub, activityText, images, targetDate]);
 
   // 오늘 글 수정 시작
   function startEdit(todayPost: TodayPost) {
@@ -177,14 +212,19 @@ export default function UploadPage() {
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const today = getTodayKST();
+      // 지난 날짜는 허용된 날짜만
+      if (isPast && !backfillDates.includes(targetDate)) {
+        setError("이 날짜로는 인증할 수 없어요");
+        setLoading(false);
+        return;
+      }
 
       // 직전 인증글과 똑같은 내용 금지 (새 글/수정 공통)
       const { data: prevPost } = await supabase
         .from("posts")
         .select("activity_text")
         .eq("user_id", user.id)
-        .lt("date", today)
+        .lt("date", targetDate)
         .order("date", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -232,16 +272,16 @@ export default function UploadPage() {
         return;
       }
 
-      // 오늘 이미 올린 게시물 확인
+      // 그날 이미 올린 게시물 확인
       const { data: existing } = await supabase
         .from("posts")
         .select("id")
         .eq("user_id", user.id)
-        .eq("date", today)
+        .eq("date", targetDate)
         .maybeSingle();
 
       if (existing) {
-        setError("오늘은 이미 인증했습니다 🎉");
+        setError(isPast ? `${md(targetDate)}은 이미 인증했어요` : "오늘은 이미 인증했습니다 🎉");
         setLoading(false);
         return;
       }
@@ -263,7 +303,7 @@ export default function UploadPage() {
         .insert({
           user_id: user.id,
           group_id: group.id,
-          date: today,
+          date: targetDate,
           category,
           subcategory: isEtc ? null : subcategory.trim(),
           activity_text: activityText.trim(),
@@ -295,6 +335,8 @@ export default function UploadPage() {
       setError(
         msg.includes("check constraint")
           ? "입력 내용이 인증 조건에 맞지 않아요. 내용을 조금 더 자세히 적어주세요"
+          : msg.includes("row-level security") && isPast
+          ? "이 날짜로는 인증할 수 없어요"
           : msg
       );
       setLoading(false);
@@ -325,7 +367,7 @@ export default function UploadPage() {
           </svg>
         </button>
         <h1 className="text-lg font-bold text-foreground flex-1">
-          {editing ? "인증 수정" : "오늘의 인증"}
+          {editing ? "인증 수정" : isPast ? `${md(targetDate)} 인증` : "오늘의 인증"}
         </h1>
       </header>
 
@@ -335,13 +377,22 @@ export default function UploadPage() {
         </div>
       )}
 
-      {todayPost && !editing && (
+      {todayPost && !editing && !isPast && (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 pb-32 text-center">
           <span className="text-5xl">🎉</span>
           <div>
             <p className="text-lg font-bold text-foreground">오늘 이미 인증했어요!</p>
             <p className="text-muted text-sm mt-1">내일 또 만나요</p>
           </div>
+          {backfillDates.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTargetDate(backfillDates[0])}
+              className="px-6 py-3 rounded-2xl bg-card border border-border text-foreground font-bold active:scale-[0.98] transition-all"
+            >
+              지난 날짜 인증하기 ({backfillDates.length}일 남음)
+            </button>
+          )}
           <button
             type="button"
             onClick={() => router.push("/")}
@@ -352,15 +403,42 @@ export default function UploadPage() {
         </div>
       )}
 
-      {(todayPost === null || editing) && (
+      {showForm && (
       <form
         id="upload-form"
         onSubmit={handleSubmit}
         className="flex-1 flex flex-col gap-5 p-4 pb-32"
       >
+        {/* 날짜 선택 (지난 날짜 인증이 켜진 멤버만) */}
+        {!editing && backfillDates.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-semibold text-foreground">언제 한 일인가요?</label>
+            <div className="flex flex-wrap gap-2">
+              {[...(todayPost === null ? [today] : []), ...backfillDates].map((d) => {
+                const active = d === targetDate;
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setTargetDate(d)}
+                    className={`px-3 py-1.5 rounded-full border text-sm transition-colors ${
+                      active
+                        ? "bg-primary border-primary text-white"
+                        : "bg-card border-border text-foreground hover:border-muted"
+                    }`}
+                  >
+                    {d === today ? "오늘" : md(d)}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-muted text-xs">최근 7일 안, 이번 달 날짜만 고를 수 있어요</p>
+          </div>
+        )}
+
         {/* Category */}
         <div className="flex flex-col gap-3">
-          <h2 className="text-xl font-bold text-foreground">오늘은 뭘 했어요?</h2>
+          <h2 className="text-xl font-bold text-foreground">{isPast ? `${md(targetDate)}에는 뭘 했어요?` : "오늘은 뭘 했어요?"}</h2>
           <div className="grid grid-cols-3 gap-2">
             {CATEGORIES.map((c) => {
               const active = c.id === category;

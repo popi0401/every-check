@@ -139,7 +139,7 @@ export default function PostCard({ post, currentUserId }: Props) {
     [reactions, currentUserId, post.id, supabase]
   );
 
-  const timeAgo = formatTimeAgo(post.created_at);
+  const timeAgo = formatTimeAgo(post.created_at, post.date);
 
   return (
     <div className="bg-card rounded-2xl overflow-hidden border border-border">
@@ -439,12 +439,17 @@ export default function PostCard({ post, currentUserId }: Props) {
   );
 }
 
-function formatTimeAgo(dateStr: string): string {
+function formatTimeAgo(dateStr: string, postDate: string): string {
   // 업로드한 시각을 한국 시간 24시간제로 표시 (예: 09:05, 23:41)
-  return new Date(dateStr).toLocaleTimeString("ko-KR", {
+  const d = new Date(dateStr);
+  const time = d.toLocaleTimeString("ko-KR", {
     timeZone: "Asia/Seoul",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   });
+  // 지난 날짜로 늦게 올린 글은 실제 업로드 날짜도 표시 (예: 11/16 14:32 업로드)
+  const uploadDay = d.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  if (uploadDay === postDate) return time;
+  return `${Number(uploadDay.slice(5, 7))}/${Number(uploadDay.slice(8, 10))} ${time} 업로드`;
 }

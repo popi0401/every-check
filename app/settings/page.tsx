@@ -22,6 +22,10 @@ export default function SettingsPage() {
     type: "success" | "error";
     msg: string;
   } | null>(null);
+  const [members, setMembers] = useState<
+    { user_id: string; backfill_enabled: boolean; nickname: string | null }[]
+  >([]);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
   const router = useRouter();
@@ -39,6 +43,21 @@ export default function SettingsPage() {
       ]);
 
       if (p) setProfile(p);
+      if (p?.is_admin && g) {
+        const { data: gm } = await supabase
+          .from("group_members")
+          .select("user_id, backfill_enabled, profiles(nickname)")
+          .eq("group_id", g.id);
+        type Row = { user_id: string; backfill_enabled: boolean | null; profiles: { nickname: string | null } | { nickname: string | null }[] | null };
+        setMembers(
+          ((gm as Row[] | null) ?? [])
+            .map((r) => {
+              const pr = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles;
+              return { user_id: r.user_id, backfill_enabled: !!r.backfill_enabled, nickname: pr?.nickname ?? null };
+            })
+            .sort((a, b) => (a.nickname ?? "").localeCompare(b.nickname ?? "", "ko"))
+        );
+      }
       if (g) {
         setGroup(g);
         setFineAmount(g.fine_amount);
@@ -117,6 +136,27 @@ export default function SettingsPage() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  // 관리자: 멤버별 지난 날짜 인증 허용 켜기/끄기
+  const toggleBackfill = async (userId: string, next: boolean) => {
+    if (!profile?.is_admin || !group) return;
+    setTogglingId(userId);
+    try {
+      const { data, error } = await supabase
+        .from("group_members")
+        .update({ backfill_enabled: next })
+        .eq("group_id", group.id)
+        .eq("user_id", userId)
+        .select("user_id");
+      if (error) throw error;
+      if (!data || data.length === 0) throw new Error("바꿀 권한이 없어요 (DB 설정을 확인해주세요)");
+      setMembers((prev) => prev.map((m) => (m.user_id === userId ? { ...m, backfill_enabled: next } : m)));
+    } catch (err: unknown) {
+      showFeedback("error", err instanceof Error ? err.message : "오류가 발생했습니다");
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -324,6 +364,41 @@ export default function SettingsPage() {
               >
                 {savingFine ? "저장 중..." : "저장"}
               </button>
+            </div>
+
+            <div className="bg-card rounded-2xl p-4 border border-border flex flex-col gap-3 mt-3">
+              <div>
+                <p className="text-foreground text-sm font-semibold">지난 날짜 인증 허용</p>
+                <p className="text-muted text-xs mt-0.5">
+                  켜진 멤버는 최근 7일 안, 이번 달 날짜로 늦게 인증할 수 있어요
+                </p>
+              </div>
+              {members.length === 0 ? (
+                <p className="text-muted text-xs">멤버를 불러오는 중이에요</p>
+              ) : (
+                members.map((m) => (
+                  <div key={m.user_id} className="flex items-center justify-between gap-3">
+                    <span className="text-foreground text-sm truncate">{m.nickname ?? "이름 없음"}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={m.backfill_enabled}
+                      aria-label={`${m.nickname ?? "멤버"} 지난 날짜 인증 허용`}
+                      disabled={togglingId === m.user_id}
+                      onClick={() => toggleBackfill(m.user_id, !m.backfill_enabled)}
+                      className={`relative w-11 h-6 rounded-full transition-colors flex-shrink-0 disabled:opacity-50 ${
+                        m.backfill_enabled ? "bg-primary" : "bg-border"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                          m.backfill_enabled ? "translate-x-5" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </section>
         )}
